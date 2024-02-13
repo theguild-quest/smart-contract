@@ -1,4 +1,4 @@
-//SPDX-License-Identifier: MIT
+//SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.0;
 
 import { IEscrow } from "./interfaces/Quests/IEscrow.sol";
@@ -8,6 +8,7 @@ import { ITavern } from "./interfaces/Quests/ITavern.sol";
 /**
  * @title Quest Implementation
  * @notice Controls the quest flow
+ * @author @cosmodude
  * @dev Implementation contract, instances are created as ERC1167 clones 
  */
 
@@ -20,18 +21,20 @@ contract Quest is IQuest {
     bool public beingDisputed = false;
     bool public finished = false;
     bool public rewarded = false;
+    bool public withToken;
 
-    ITavern private Tavern;
     address public escrowImplemntation; // native or with token
-
     uint32 public solverId;
+    address public token;
     uint32 public seekerId;
-    IEscrow private escrow;
-    uint256 public paymentAmount;
+    address public mediator;
     string public infoURI;
+    uint256 public paymentAmount;
     uint256 public rewardTime = 0;
-    address public magistrate;
-
+    
+    ITavern private Tavern;
+    IEscrow private escrow;
+    
     modifier onlySeeker() {
         require(Tavern.ownerOf(seekerId) == msg.sender, "only Seeker");
         _;
@@ -42,18 +45,9 @@ contract Quest is IQuest {
         _;
     }
 
-    modifier onlyMagistrate() {
-        require(msg.sender == magistrate, "only magistrate");
+    modifier onlyMediator() {
+        require(msg.sender == mediator, "only mediator");
         _;
-    }
-
-    modifier onlyTavern() {
-        require(msg.sender == address(Tavern), "only tavern");
-        _;
-    }
-
-    constructor(address _tavern) {
-        Tavern = ITavern(_tavern);
     }
 
     function initialize(
@@ -61,25 +55,34 @@ contract Quest is IQuest {
         uint32 _seekerNftId,
         uint256 _paymentAmount,
         string memory _infoURI,
-        address _escrowImplemntation
-    ) external onlyTavern returns (bool) {
+        address _escrowImplementation,
+        address _token
+    ) external returns (bool) {
+        Tavern = ITavern(msg.sender);
         require(!initialized);
         initialized = true;
         solverId = _solverNftId;
         seekerId = _seekerNftId;
         paymentAmount = _paymentAmount;
         infoURI = _infoURI;
-        escrowImplemntation = _escrowImplemntation;
+        escrowImplemntation = _escrowImplementation;
+        token = _token;
         return true;
     }
 
     function startQuest() external payable onlySeeker {
         require(initialized, "not initialized");
         require(!started, "already started");
-        require(msg.value >= paymentAmount, "wrong payment amount");
-        escrow = IEscrow(Clones.clone(escrowImplemntation));
-        escrow.initialize{value: msg.value}();
+        if(token == address(0)){
+            require(msg.value >= paymentAmount, "wrong payment amount");
+            // todo tax logic
+
+        } else {
+           // todo tax logic 
+        }
         started = true;
+        escrow = IEscrow(Clones.clone(escrowImplemntation));
+        escrow.initialize{value: msg.value}(token);
     }
 
     // todo
@@ -87,18 +90,17 @@ contract Quest is IQuest {
         require(started, "quest not started");
         require(!beingDisputed, "Dispute started before");
         beingDisputed = true;
-        //magistrate = Tavern.magistrate();
+        //mediator = Tavern.mediator();
     }
 
     function resolveDispute(
-        uint8 seekerShare,
         uint8 solverShare
-    ) external onlyMagistrate {
+    ) external onlyMediator {
         require(beingDisputed, "Dispute not started");
         require(!rewarded, "Rewarded before");
-        require(seekerShare + solverShare == 100, "Shares should sum to 100");
+        require(solverShare <= 100, "Share can't be more than 100");
         rewarded = true;
-        escrow.proccessResolution(seekerId, solverId, seekerShare, solverShare);
+        escrow.proccessResolution(seekerId, solverId, solverShare, getRewarder());
     }
 
     function finishQuest() external onlySolver {

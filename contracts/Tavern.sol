@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: GNU AGPLv3
 pragma solidity ^0.8.0;
 
 import "./interfaces/IProfileNFT.sol";
@@ -11,6 +11,7 @@ import { ITavern } from "./interfaces/Quests/ITavern.sol";
 /**
  * @title Quest Factory (Tavern)
  * @notice Deploys Quest Contracts and manages them
+ * @author @cosmodude
  */
 contract Tavern is AccessControl, ITavern {
     address public owner;
@@ -22,7 +23,7 @@ contract Tavern is AccessControl, ITavern {
     address public seekerFeesTreasury;
     address public solverFeesTreasury;
     address public disputeFeesTreasury;
-    address public counselor; //mediator
+    address public mediator; // for disputes
     uint256 public reviewPeriod = 1;
     IProfileNFT private nFT;
 
@@ -36,12 +37,23 @@ contract Tavern is AccessControl, ITavern {
         _;
     }
 
-    event QuestCreated(
+    // quests with paymants in native token
+    event QuestCreatedNative(
         uint32 solverId,
         uint32 seekerId,
         address quest,
         address escrowImplementation,
         uint256 paymentAmount
+    );
+    
+    // quests with token payments
+    event QuestCreatedToken(
+        uint32 solverId,
+        uint32 seekerId,
+        address quest,
+        address escrowImplementation,
+        uint256 paymentAmount,
+        address token
     );
 
     constructor(
@@ -57,31 +69,68 @@ contract Tavern is AccessControl, ITavern {
         nFT = IProfileNFT(_profileNft);
     }
 
+    /**
+     * @notice Function to create quests with Native token payments
+     * @param _solverId Nft id of the solver of the quest
+     * @param _seekerId Nft id of the seeker of the quest
+     * @param _paymentAmount Amount of Native tokens to be paid
+     * @param infoURI Link to the info a bout quest (flexible, decide with backend)
+     */
     function createNewQuest(
         // user identificators
         uint32 _solverId,
         uint32 _seekerId,
         uint256 _paymentAmount,
-        string memory infoURI,
-        bool withTokens
+        string memory infoURI
     ) external payable onlyBarkeeper {
         IQuest quest = IQuest(Clones.clone(questImplementation));
-        address escrowImpl;
-        if (withTokens){
-            escrowImpl = escrowTokenImplementation;
-        }
-        else { escrowImpl = escrowNativeImplementation;}
+        address escrowImpl = escrowNativeImplementation;
+   
+        emit QuestCreatedNative(_seekerId, _solverId, address(quest), escrowImpl, _paymentAmount);
 
         quest.initialize(
             _solverId,
             _seekerId,
             _paymentAmount,
             infoURI,
-            escrowImpl
+            escrowImpl,
+            address(0)
         );
-        emit QuestCreated(_seekerId, _solverId, address(quest), escrowImpl, _paymentAmount);
+        
     }
 
+    /**
+     * @notice Function to create quests with ERC20 token payments
+     * @param _solverId Nft id of the solver of the quest
+     * @param _seekerId Nft id of the seeker of the quest
+     * @param _paymentAmount Amount of Native tokens to be paid
+     * @param infoURI Link to the info a bout quest (flexible, decide with backend)
+     * @param _token Address of the paymant token
+     */
+    function createNewQuest(
+        // user identificators
+        uint32 _solverId,
+        uint32 _seekerId,
+        uint256 _paymentAmount,
+        string memory infoURI,
+        address _token
+    ) external payable onlyBarkeeper {
+        IQuest quest = IQuest(Clones.clone(questImplementation));
+        address escrowImpl = escrowTokenImplementation;
+
+        emit QuestCreatedToken(_seekerId, _solverId, address(quest), escrowImpl, _paymentAmount, _token);
+
+        quest.initialize(
+            _solverId,
+            _seekerId,
+            _paymentAmount,
+            infoURI,
+            escrowImpl,
+            _token
+        );
+        
+    }
+       
     function confirmNFTOwnership(
         address identity
     ) public view returns (bool confirmed) {
@@ -123,8 +172,8 @@ contract Tavern is AccessControl, ITavern {
         disputeFeesTreasury = treasury;
     }
 
-    function setCounselor(address _counselor) external onlyOwner {
-        counselor = _counselor;
+    function setMediator(address _mediator) external onlyOwner {
+        mediator = _mediator;
     }
 
     function setReviewPeriod(uint256 period) external onlyOwner {
